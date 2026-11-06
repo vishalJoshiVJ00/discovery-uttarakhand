@@ -5,6 +5,8 @@ import { env } from './config/env';
 import { requestIdMiddleware } from './shared/middleware/request-id.middleware';
 import { errorHandler } from './shared/middleware/error.middleware';
 import { NotFoundError } from './shared/errors/app-error';
+import { prisma } from './shared/database/prisma';
+import { logger } from './shared/utils/logger';
 
 const app = express();
 
@@ -48,6 +50,44 @@ app.get(`${env.API_PREFIX}/health`, (req: Request, res: Response) => {
   });
 });
 
+// Database Readiness & Health Check Endpoint
+app.get(`${env.API_PREFIX}/health/db`, async (req: Request, res: Response) => {
+  const now = new Date().toISOString();
+  const requestId = req.id || 'unknown';
+
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.status(200).json({
+      success: true,
+      data: {
+        status: 'healthy',
+        database: 'connected',
+        timestamp: now,
+      },
+      meta: {
+        timestamp: now,
+        requestId,
+      },
+    });
+  } catch (error) {
+    logger.error('Database health check probe failed', {
+      error: error instanceof Error ? error.message : 'Unknown database connection error',
+      requestId,
+    });
+    res.status(503).json({
+      success: false,
+      error: {
+        code: 'DATABASE_UNAVAILABLE',
+        message: 'Database connection health check failed.',
+      },
+      meta: {
+        timestamp: now,
+        requestId,
+      },
+    });
+  }
+});
+
 // 404 Handler for Unmatched Endpoints
 app.use((_req: Request, _res: Response, next: NextFunction) => {
   next(new NotFoundError('Requested API endpoint does not exist.'));
@@ -57,4 +97,3 @@ app.use((_req: Request, _res: Response, next: NextFunction) => {
 app.use(errorHandler);
 
 export default app;
-
